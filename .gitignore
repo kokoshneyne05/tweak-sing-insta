@@ -1,6 +1,0 @@
-build/
-dist/
-third_party/
-*.xcodeproj/
-*.xcworkspace/
-.DS_Store
