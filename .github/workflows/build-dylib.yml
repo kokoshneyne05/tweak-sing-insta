@@ -1,0 +1,210 @@
+name: Build InstaProxy.dylib (iOS arm64)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "GitHub Actions macOS раннер (macos-15-intel обходит перегрузку очереди macOS arm64)"
+        required: false
+        default: "macos-15-intel"
+        type: choice
+        options:
+          - "macos-15-intel"
+          - "macos-15"
+          - "macos-latest"
+      force_build_libbox:
+        description: "Собрать Libbox.xcframework из исходников SagerNet/sing-box вместо скачивания готового релиза"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+concurrency:
+  group: build-instaproxy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios-dylib:
+    # macos-15-intel uses the x86_64 macOS pool (avoids GitHub's overloaded macOS arm64 capacity queue)
+    # while still shipping full Xcode & iPhoneOS SDK to cross-compile arm64 iOS binaries.
+    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode & verify iOS SDK
+        run: |
+          set -euo pipefail
+          xcode-select -p
+          xcrun --sdk iphoneos --show-sdk-path
+          xcrun --sdk iphoneos clang++ --version
+
+      - name: Download facebook/fishhook
+        run: |
+          set -euo pipefail
+          mkdir -p third_party/fishhook
+          curl -fsSL --retry 3 --retry-delay 2 \
+            https://raw.githubusercontent.com/facebook/fishhook/main/fishhook.h \
+            -o third_party/fishhook/fishhook.h
+          curl -fsSL --retry 3 --retry-delay 2 \
+            https://raw.githubusercontent.com/facebook/fishhook/main/fishhook.c \
+            -o third_party/fishhook/fishhook.c
+          ls -la third_party/fishhook
+
+      - name: Download prebuilt Libbox.xcframework (with source-build fallback)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_SOURCE: ${{ inputs.force_build_libbox || 'false' }}
+        run: |
+          set -euo pipefail
+          mkdir -p third_party
+
+          download_prebuilt() {
+            local repo="$1"
+            echo "Checking GitHub releases in ${repo}..."
+            local api_url="https://api.github.com/repos/${repo}/releases?per_page=25"
+            local releases_json
+            releases_json=$(curl -fsSL --retry 3 --retry-delay 2 \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$api_url" || true)
+
+            if [ -z "$releases_json" ]; then
+              return 1
+            fi
+
+            local candidate_urls
+            candidate_urls=$(printf '%s' "$releases_json" | jq -r '
+              (
+                [.[] | select((.tag_name // "") | test("1\\.11\\.")) | .assets[]? | select(
+                  (.name | ascii_downcase | contains("libbox")) and
+                  (.name | ascii_downcase | (endswith(".zip") or endswith(".tar.gz") or endswith(".tgz")))
+                ) | .browser_download_url]
+                +
+                [.[] | .assets[]? | select(
+                  (.name | ascii_downcase | contains("libbox")) and
+                  (.name | ascii_downcase | (endswith(".zip") or endswith(".tar.gz") or endswith(".tgz")))
+                ) | .browser_download_url]
+              ) | reduce .[] as $u ([]; if index($u) then . else . + [$u] end) | .[]
+            ')
+
+            if [ -z "$candidate_urls" ]; then
+              return 1
+            fi
+
+            local asset_url
+            for asset_url in $candidate_urls; do
+              echo "Testing prebuilt Libbox archive: $asset_url"
+              local tmp_dir
+              tmp_dir=$(mktemp -d)
+              local archive="${tmp_dir}/libbox_archive"
+              if ! curl -fsSL --retry 3 --retry-delay 2 "$asset_url" -o "$archive"; then
+                rm -rf "$tmp_dir"
+                continue
+              fi
+
+              mkdir -p "${tmp_dir}/extracted"
+              if [[ "$asset_url" == *.zip ]]; then
+                unzip -q "$archive" -d "${tmp_dir}/extracted" || { rm -rf "$tmp_dir"; continue; }
+              else
+                tar -xzf "$archive" -C "${tmp_dir}/extracted" || { rm -rf "$tmp_dir"; continue; }
+              fi
+
+              local found_xcfw
+              found_xcfw=$(find "${tmp_dir}/extracted" -maxdepth 4 -type d -name "Libbox.xcframework" | head -n 1 || true)
+              if [ -n "$found_xcfw" ]; then
+                local arm64_slice
+                arm64_slice=$(find "$found_xcfw" -maxdepth 2 -type d -name "ios-arm64*" ! -name "*simulator*" | head -n 1 || true)
+                local objc_hdr="${arm64_slice}/Libbox.framework/Headers/Libbox.objc.h"
+                if [ -n "$arm64_slice" ] && [ -f "$objc_hdr" ] && grep -q "LibboxNewService" "$objc_hdr"; then
+                  rm -rf third_party/Libbox.xcframework
+                  cp -R "$found_xcfw" third_party/Libbox.xcframework
+                  rm -rf "$tmp_dir"
+                  return 0
+                fi
+              fi
+
+              rm -rf "$tmp_dir"
+            done
+
+            return 1
+          }
+
+          if [ "$FORCE_SOURCE" != "true" ]; then
+            if download_prebuilt "EbrahimTahernejad/sing-box-lib"; then
+              echo "Successfully downloaded compatible prebuilt Libbox.xcframework!"
+            else
+              echo "Prebuilt download unavailable; falling back to building Libbox.xcframework from SagerNet/sing-box (v1.11.x)..."
+              FORCE_SOURCE="true"
+            fi
+          fi
+
+          if [ "$FORCE_SOURCE" = "true" ]; then
+            if ! command -v go >/dev/null 2>&1; then
+              brew install go
+            fi
+            export PATH="$(go env GOPATH)/bin:$PATH"
+            rm -rf /tmp/sing-box-src
+            git clone --depth=1 --branch v1.11.11 https://github.com/SagerNet/sing-box.git /tmp/sing-box-src || \
+              git clone --depth=1 https://github.com/SagerNet/sing-box.git /tmp/sing-box-src
+            cd /tmp/sing-box-src
+            go install -v github.com/sagernet/gomobile/cmd/gomobile@latest
+            go install -v github.com/sagernet/gomobile/cmd/gobind@latest
+            gomobile init
+            go run ./cmd/internal/build_libbox -target ios
+            cp -R Libbox.xcframework "${GITHUB_WORKSPACE}/third_party/Libbox.xcframework"
+            cd "${GITHUB_WORKSPACE}"
+          fi
+
+          ARM64_SLICE=$(find third_party/Libbox.xcframework -maxdepth 2 -type d -name "ios-arm64*" ! -name "*simulator*" | head -n 1)
+          if [ -z "$ARM64_SLICE" ] || [ ! -d "${ARM64_SLICE}/Libbox.framework" ]; then
+            echo "ERROR: Could not locate ios-arm64 Libbox.framework inside Libbox.xcframework!"
+            exit 1
+          fi
+          echo "LIBBOX_SLICE_DIR=${ARM64_SLICE}" >> "$GITHUB_ENV"
+          echo "Verifying Libbox.xcframework slice: ${ARM64_SLICE}"
+          ls -la "${ARM64_SLICE}/Libbox.framework"
+          grep -E "Libbox(Setup|NewService|Version)" "${ARM64_SLICE}/Libbox.framework/Headers/Libbox.objc.h" || true
+          file "${ARM64_SLICE}/Libbox.framework/Libbox"
+          lipo -info "${ARM64_SLICE}/Libbox.framework/Libbox" || true
+
+      - name: Compile InstaProxy.dylib (arm64, iOS 15+)
+        run: |
+          set -euo pipefail
+          make clean
+          make LIBBOX_FW_DIR="${LIBBOX_SLICE_DIR}" all
+          make LIBBOX_FW_DIR="${LIBBOX_SLICE_DIR}" verify
+
+      - name: Verify zero CydiaSubstrate dependency
+        run: |
+          set -euo pipefail
+          if otool -L build/InstaProxy.dylib | grep -iE "substrate|substitute|ellekit"; then
+            echo "ERROR: Unexpected jailbreak library dependency detected!"
+            exit 1
+          fi
+          echo "Verified: InstaProxy.dylib has zero jailbreak dependencies (jailed/sideload ready)."
+
+      - name: Prepare release artifacts (InstaProxy.dylib + Libbox.xcframework)
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          cp build/InstaProxy.dylib dist/InstaProxy.dylib
+          cp -R third_party/Libbox.xcframework dist/Libbox.xcframework
+          cp -R "${LIBBOX_SLICE_DIR}/Libbox.framework" dist/Libbox.framework
+          ls -lh dist
+
+      - name: Upload InstaProxy Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: InstaProxy-iOS-arm64
+          path: dist/
+          retention-days: 30

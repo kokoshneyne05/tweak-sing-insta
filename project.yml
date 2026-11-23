@@ -1,0 +1,51 @@
+name: InstaProxy
+options:
+  bundleIdPrefix: com.instaproxy
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+targets:
+  InstaProxy:
+    type: library.dynamic
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: src
+      - path: third_party/fishhook
+    dependencies:
+      - framework: third_party/Libbox.xcframework
+        embed: false
+      - sdk: Foundation.framework
+      - sdk: UIKit.framework
+      - sdk: CFNetwork.framework
+      - sdk: CoreFoundation.framework
+      - sdk: CoreTelephony.framework
+      - sdk: Security.framework
+      - sdk: Network.framework
+      - sdk: NetworkExtension.framework
+      - sdk: SystemConfiguration.framework
+      - sdk: libresolv.tbd
+      - sdk: libz.tbd
+    settings:
+      base:
+        PRODUCT_NAME: InstaProxy
+        EXECUTABLE_PREFIX: ""
+        EXECUTABLE_EXTENSION: dylib
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: NO
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        CLANG_ENABLE_OBJC_ARC: YES
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/src"
+          - "$(SRCROOT)/third_party/fishhook"
+        LD_DYLIB_INSTALL_NAME: "@rpath/InstaProxy.dylib"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "@executable_path/Frameworks"
+          - "@loader_path"
+          - "@loader_path/Frameworks"
+        OTHER_LDFLAGS:
+          - "-ObjC"
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        ENABLE_BITCODE: NO
