@@ -12,7 +12,7 @@ CXX               := $(shell xcrun --sdk iphoneos --find clang++)
 
 FISHHOOK_DIR      ?= third_party/fishhook
 LIBBOX_XCFRAMEWORK ?= third_party/Libbox.xcframework
-LIBBOX_FW_DIR     := $(LIBBOX_XCFRAMEWORK)/ios-arm64
+LIBBOX_FW_DIR     ?= $(shell find $(LIBBOX_XCFRAMEWORK) -maxdepth 2 -type d -name "ios-arm64*" ! -name "*simulator*" 2>/dev/null | head -n 1)
 
 MIN_IOS_VERSION   := 15.0
 
@@ -28,9 +28,9 @@ CFLAGS            := $(COMMON_FLAGS) -std=c11
 OBJCXXFLAGS       := $(COMMON_FLAGS) \
                      -std=c++17 \
                      -fobjc-arc \
-                     -fmodules \
                      -Wno-protocol \
-                     -Wno-incomplete-implementation
+                     -Wno-incomplete-implementation \
+                     -Wno-deprecated-declarations
 
 LDFLAGS           := -arch arm64 \
                      -isysroot $(SDK_PATH) \

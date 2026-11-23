@@ -28,7 +28,7 @@ static NSString *const kSingBoxErrorDomain = @"com.instaproxy.singbox";
     return YES;
 }
 
-- (BOOL)openTun:(id<LibboxTunOptions> _Nullable)options ret0_:(int32_t * _Nullable)ret0_ error:(NSError * _Nullable * _Nullable)error {
+- (BOOL)openTun:(id _Nullable)options ret0_:(int32_t * _Nullable)ret0_ error:(NSError * _Nullable * _Nullable)error {
     if (error) {
         *error = [NSError errorWithDomain:kSingBoxErrorDomain
                                      code:3001
@@ -67,15 +67,15 @@ static NSString *const kSingBoxErrorDomain = @"com.instaproxy.singbox";
     }
 }
 
-- (BOOL)startDefaultInterfaceMonitor:(id<LibboxInterfaceUpdateListener> _Nullable)listener error:(NSError * _Nullable * _Nullable)error {
+- (BOOL)startDefaultInterfaceMonitor:(id _Nullable)listener error:(NSError * _Nullable * _Nullable)error {
     return YES;
 }
 
-- (BOOL)closeDefaultInterfaceMonitor:(id<LibboxInterfaceUpdateListener> _Nullable)listener error:(NSError * _Nullable * _Nullable)error {
+- (BOOL)closeDefaultInterfaceMonitor:(id _Nullable)listener error:(NSError * _Nullable * _Nullable)error {
     return YES;
 }
 
-- (id<LibboxNetworkInterfaceIterator> _Nullable)getInterfaces:(NSError * _Nullable * _Nullable)error {
+- (id _Nullable)getInterfaces:(NSError * _Nullable * _Nullable)error {
     return nil;
 }
 
@@ -90,11 +90,19 @@ static NSString *const kSingBoxErrorDomain = @"com.instaproxy.singbox";
 - (void)clearDNSCache {
 }
 
-- (LibboxWIFIState * _Nullable)readWIFIState {
+- (id _Nullable)readWIFIState {
     return nil;
 }
 
-- (BOOL)sendNotification:(LibboxNotification * _Nullable)notification error:(NSError * _Nullable * _Nullable)error {
+- (id _Nullable)localDNSTransport {
+    return nil;
+}
+
+- (id _Nullable)systemCertificates {
+    return nil;
+}
+
+- (BOOL)sendNotification:(id _Nullable)notification error:(NSError * _Nullable * _Nullable)error {
     return YES;
 }
 
